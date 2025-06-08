@@ -1,11 +1,9 @@
 import tkinter as tk
 from tkinter import filedialog, scrolledtext
-import requests  # Use requests for OpenRouter API
-  # For DeepSeek-compatible SDK
+import requests
 import os
 
-# === SETUP YOUR CLIENT HERE ===
-# === SETUP ===
+# === LOAD API KEY ===
 def load_api_key(filename="API_KEY_CLASSIFIED.txt"):
     try:
         with open(filename, 'r') as f:
@@ -14,49 +12,113 @@ def load_api_key(filename="API_KEY_CLASSIFIED.txt"):
         raise RuntimeError(f"Failed to load API key from {filename}: {e}")
 
 API_KEY = load_api_key()
-  # Use your actual OpenRouter key here or from env
 
 # === APP STATE ===
 app_state = {
-    "file_path": None
+    "file_path": None,
+    "methods": {}
 }
 
 # === GUI CALLBACKS ===
 def browse_file():
-    file_path = filedialog.askopenfilename(filetypes=[("Code/Text Files", "*.java *.txt")])
+    file_path = filedialog.askopenfilename(
+    filetypes=[
+        ("Java Files", "*.java"),
+        ("Python Files", "*.py"),
+        ("C++ Files", "*.cpp"),
+        ("Text Files", "*.txt"),
+        ("All Files", "*.*")
+    ]
+)
     if file_path:
         filename = os.path.basename(file_path)
         file_label.config(text=f"Selected File: {filename}")
         app_state["file_path"] = file_path
+        show_method_inputs(file_path)
 
-def run_sessions():
-    clear_response()
-
-    file_path = app_state.get("file_path")
-    explanation = input_output_entry.get().strip()
-
-    if not file_path or not os.path.exists(file_path):
-        show_response("Error: No valid file selected.")
-        return
-
-    if not explanation:
-        show_response("Error: Please enter a description in 'Desired INPUT/OUTPUT'.")
-        return
+def show_method_inputs(file_path):
+    for widget in method_input_frame.winfo_children():
+        widget.destroy()
 
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            method_code = f.read().strip()
+            code = f.read()
     except Exception as e:
         show_response(f"Error reading file: {e}")
         return
 
-    prompt = (
-        f"QA this Java function strictly:\n"
-        f"Function: {method_code}\n"
-        f"Requirement: {explanation}\n"
-        f"If correct, respond with exactly: congrats - and skip the following inccorect part\n"
-        f"If incorrect, return only the fixed Java function code.\n"
-        f"No explanation. No repetition. One line of code only. Respond strictly."
+    methods = extract_method_names(code)
+    app_state["methods"] = {}
+
+    for name in methods:
+        label = tk.Label(method_input_frame, text=f"{name} requirement:")
+        label.pack()
+        entry = tk.Entry(method_input_frame, width=80)
+        entry.pack(pady=2)
+        app_state["methods"][name] = entry
+
+
+#def extract_method_names(code):
+ #   import re
+  #  pattern = r'(?:public|private|protected)?\s*(?:static)?\s*\w+\s+(\w+)\s*\([^)]*\)\s*\{'  # generic Java/C-like method
+   # return re.findall(pattern, code)
+
+def extract_method_names(code):
+    import re
+    method_names = set()
+
+    # Python: def func_name(
+    python_methods = re.findall(r'^\s*def\s+(\w+)\s*\(', code, re.MULTILINE)
+    method_names.update(python_methods)
+
+    # Java/C++/C#/etc.: returnType methodName(
+    generic_methods = re.findall(r'(?:public|private|protected)?\s*(?:static\s+)?(?:\w+::)?\w[\w:<>\[\]]*\s+(\w+)\s*\([^)]*\)\s*\{?', code)
+    method_names.update(generic_methods)
+
+
+    # Named function declarations
+    js_functions = re.findall(r'\bfunction\s+(\w+)\s*\(', code)
+    method_names.update(js_functions)
+
+    # Methods in classes and object literals
+    methods = re.findall(r'(\w+)\s*\([^)]*\)\s*{', code)
+    method_names.update(methods)
+
+    # JavaScript/TypeScript/ES6: const funcName = (...) => {
+    arrow_functions = re.findall(r'const\s+(\w+)\s*=\s*\([^)]*\)\s*=>', code)
+    method_names.update(arrow_functions)
+
+    return sorted(method_names)
+
+
+def run_sessions():
+    clear_response()
+    file_path = app_state.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        show_response("Error: No valid file selected.")
+        return
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code = f.read().strip()
+    except Exception as e:
+        show_response(f"Error reading file: {e}")
+        return
+
+    requirement_section = "\n".join([
+        f"- {name}: {entry.get().strip()}" for name, entry in app_state["methods"].items() if entry.get().strip()
+    ])
+
+    full_prompt = (
+        "You are a code fixer bot. Your task is to check the given code against the method requirements.\n"
+        "Return ONLY the full corrected code without ANY explanations, comments, or text.\n"
+        "If the code already meets the requirements, return it EXACTLY as given.\n"
+        "Do NOT include markdown formatting (no ```), no explanations, no comments, only code.\n\n"
+        "=== Code ===\n"
+        f"{code}\n\n"
+        "=== Requirements ===\n"
+        f"{requirement_section}\n\n"
+        "Return only the corrected or original code as plain text."
     )
 
     try:
@@ -68,7 +130,7 @@ def run_sessions():
         payload = {
             "model": "deepseek/deepseek-r1-0528-qwen3-8b:free",
             "messages": [
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": full_prompt}
             ]
         }
 
@@ -79,8 +141,7 @@ def run_sessions():
         reply = data["choices"][0]["message"]["content"].strip()
         show_response(reply)
 
-        # === NEW LOGIC HERE ===
-        if reply.lower() != "congrats":
+        if reply != code:
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(reply)
@@ -90,9 +151,9 @@ def run_sessions():
     except Exception as e:
         show_response(f"API Error: {e}")
 
-
 def show_response(text):
     response_text.config(state='normal')
+    response_text.delete('1.0', tk.END)
     response_text.insert(tk.END, text)
     response_text.config(state='disabled')
 
@@ -104,37 +165,25 @@ def clear_response():
 # === GUI SETUP ===
 root = tk.Tk()
 root.title("AI QA Code Checker")
-root.geometry("600x520")
-root.resizable(False, False)
+root.geometry("700x700")
 
-# File Browser
 browse_button = tk.Button(root, text="Browse File", command=browse_file)
 browse_button.pack(pady=(10, 5))
 
 file_label = tk.Label(root, text="Selected File: None", fg="blue")
 file_label.pack()
 
-# Input/Output Explanation
-input_output_label = tk.Label(root, text="Desired INPUT/OUTPUT")
-input_output_label.pack(pady=(20, 0))
+method_input_frame = tk.Frame(root)
+method_input_frame.pack(pady=10)
 
-input_output_entry = tk.Entry(root, width=80)
-input_output_entry.pack(pady=5)
-
-# AI Response Section
-response_label = tk.Label(root, text="AI RESPONSE CODE")
-response_label.pack(pady=(20, 5))
-
-response_frame = tk.Frame(root)
-response_frame.pack(expand=True, fill='both', padx=10, pady=5)
-
-response_text = scrolledtext.ScrolledText(response_frame, wrap=tk.WORD, height=10)
-response_text.pack(fill='both', expand=True)
-response_text.config(state='disabled')
-
-# Run Button
-run_button = tk.Button(root, text="Run Sessions", command=run_sessions)
+run_button = tk.Button(root, text="Run QA", command=run_sessions)
 run_button.pack(pady=10)
 
-# Start App
+response_label = tk.Label(root, text="AI Response")
+response_label.pack()
+
+response_text = scrolledtext.ScrolledText(root, wrap=tk.WORD, height=15)
+response_text.pack(fill='both', expand=True, padx=10, pady=10)
+response_text.config(state='disabled')
+
 root.mainloop()
