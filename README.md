@@ -11,3 +11,7 @@ TKINTER lib
 
 Nice to have:
 OPENAI lib
+
+Also:
+You can always change the AI model you want to use. I used the updated free version of DeepSeek AI model(as you can see via 'payload' variable), but you
+can always scroll on https://openrouter.ai/ and look up for a better model(or a model you already paid for perhaps)
