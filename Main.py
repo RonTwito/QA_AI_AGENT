@@ -23,11 +23,11 @@ app_state = {
 def browse_file():
     file_path = filedialog.askopenfilename(
     filetypes=[
+        ("All Files", "*.*"),
         ("Java Files", "*.java"),
         ("Python Files", "*.py"),
         ("C++ Files", "*.cpp"),
-        ("Text Files", "*.txt"),
-        ("All Files", "*.*")
+        ("Text Files", "*.txt")
     ]
 )
     if file_path:
@@ -58,37 +58,40 @@ def show_method_inputs(file_path):
         app_state["methods"][name] = entry
 
 
-#def extract_method_names(code):
- #   import re
-  #  pattern = r'(?:public|private|protected)?\s*(?:static)?\s*\w+\s+(\w+)\s*\([^)]*\)\s*\{'  # generic Java/C-like method
-   # return re.findall(pattern, code)
-
 def extract_method_names(code):
     import re
     method_names = set()
 
-    # Python: def func_name(
+    # Python methods
     python_methods = re.findall(r'^\s*def\s+(\w+)\s*\(', code, re.MULTILINE)
     method_names.update(python_methods)
 
-    # Java/C++/C#/etc.: returnType methodName(
-    generic_methods = re.findall(r'(?:public|private|protected)?\s*(?:static\s+)?(?:\w+::)?\w[\w:<>\[\]]*\s+(\w+)\s*\([^)]*\)\s*\{?', code)
-    method_names.update(generic_methods)
+    # Java/C#/C++ style methods with return type
+    cpp_like_methods = re.findall(
+        r'^\s*(?:public|private|protected)?\s*(?:static\s+)?[\w<>\[\]]+\s+(\w+)\s*\([^)]*\)\s*\{',
+        code,
+        re.MULTILINE
+    )
+    method_names.update(cpp_like_methods)
 
-
-    # Named function declarations
+    # JavaScript named functions
     js_functions = re.findall(r'\bfunction\s+(\w+)\s*\(', code)
     method_names.update(js_functions)
 
-    # Methods in classes and object literals
-    methods = re.findall(r'(\w+)\s*\([^)]*\)\s*{', code)
-    method_names.update(methods)
-
-    # JavaScript/TypeScript/ES6: const funcName = (...) => {
+    # JavaScript/TypeScript arrow functions
     arrow_functions = re.findall(r'const\s+(\w+)\s*=\s*\([^)]*\)\s*=>', code)
     method_names.update(arrow_functions)
 
+    # JavaScript/TypeScript class or object methods (excluding control keywords)
+    js_class_methods = re.findall(
+        r'^\s*(?!if|for|while|switch|catch|else)([a-zA-Z_]\w*)\s*\([^)]*\)\s*\{',
+        code,
+        re.MULTILINE
+    )
+    method_names.update(js_class_methods)
+
     return sorted(method_names)
+
 
 
 def run_sessions():
